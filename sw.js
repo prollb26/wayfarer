@@ -1,5 +1,5 @@
 // Wayfarer service worker: keeps the app and visited map tiles available offline.
-const SHELL = 'wayfarer-shell-v3';
+const SHELL = 'wayfarer-shell-v4';
 const TILES = 'wayfarer-tiles-v1';
 const SHELL_FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 const TILE_HOSTS = /(autonavi\.com|basemaps\.cartocdn\.com|tile\.openstreetmap\.org)$/;
