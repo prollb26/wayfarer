@@ -799,6 +799,11 @@ textarea{resize:vertical;min-height:70px}
 .driver .en{font-size:16px;color:#555}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;z-index:4000;font-size:14px;max-width:min(92vw,520px);box-shadow:var(--shadow)}
 .switcher{display:none}
+.brow{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line)}
+.brow>input[type=checkbox]{width:18px;height:18px;margin-top:9px;flex:none;accent-color:var(--brown)}
+.res-row>input[type=checkbox]{margin-top:2px}
+.bname{flex:1;min-width:0;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:7px 9px}
+.bsel{width:100%;max-width:100%;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:6px 8px;font-size:13px;color:var(--ink)}
 .confirm{background:var(--brown-soft);border:1px solid var(--brown);border-radius:var(--r);padding:12px;margin:10px 0}
 @media (max-width:860px){
   .main{grid-template-columns:minmax(0,1fr)}
@@ -998,7 +1003,7 @@ function renderPlan(){
   const t=T();const ideas=t.places.filter(p=>!p.day);
   let h=`<div class="triphead"><h1>${esc(t.name)}</h1><div class="tripmeta"><span>${esc(t.dest||'')}</span><span>${t.start?dayDate(t,0)+' – '+dayDate(t,t.days.length-1):'No dates'}</span><span>${t.days.length} day${t.days.length===1?'':'s'} · ${t.places.length} places</span><button class="btn sm ghost" id="editTrip">Edit trip</button></div></div>
   <div class="addbar"><input id="q" placeholder="Search a place, or paste a map link / coordinates" autocomplete="off" enterkeyhint="search"><button class="btn primary" id="qGo">Search</button><div class="results" id="results" hidden></div></div>
-  <div class="row"><button class="btn sm" id="pinBtn">Drop a pin on the map</button><button class="btn sm" id="manualBtn">Add without location</button></div>
+  <div class="row"><button class="btn sm brown" id="bulkBtn">Bulk add from a caption or list</button><button class="btn sm" id="pinBtn">Drop a pin on the map</button><button class="btn sm" id="manualBtn">Add without location</button></div>
   <p class="hint">Search uses OpenStreetMap. It can be slow in mainland China; dropping a pin or pasting coordinates always works.</p>
   ${t.sample?`<div class="confirm" style="margin-top:6px"><b>This is a sample trip.</b> Create your own with <b>+ Trip</b>, or edit this one. <button class="btn sm" id="dropSample">Delete sample</button></div>`:''}
   <div class="sec"><div class="sechead"><h2><span class="dot" style="background:#8C8F96"></span>Saved ideas <span class="sub">${ideas.length} unscheduled</span></h2>
@@ -1020,6 +1025,7 @@ function wirePlan(){
   $('#qGo').onclick=()=>doSearch($('#q').value);
   $('#q').onkeydown=e=>{if(e.key==='Enter')doSearch(e.target.value);if(e.key==='Escape')$('#results').hidden=true};
   $('#pinBtn').onclick=()=>setPin(true);
+  $('#bulkBtn').onclick=openBulk;
   $('#manualBtn').onclick=()=>addPlace({name:'New place',lat:null,lng:null},true);
   const ds=$('#dropSample');if(ds)ds.onclick=()=>{S.trips=S.trips.filter(x=>x.id!==t.id);if(!S.trips.length)S.trips.push(blankTrip());S.cur=S.trips[0].id;save();renderAll(true)};
   $('#autoBtn').onclick=()=>{$('#autoConfirm').innerHTML=`<div class="confirm"><b>Auto-plan ${t.days.length} days</b><p class="hint" style="margin:4px 0 8px">Groups places by neighborhood, one cluster per day, then orders each day as a route from your hotel.</p><div class="row"><button class="btn sm brown" id="apIdeas">Place my ideas only</button><button class="btn sm" id="apAll">Re-plan everything</button><button class="btn sm ghost" id="apNo">Cancel</button></div></div>`;
@@ -1069,32 +1075,43 @@ function autoPlan(all){
 }
 
 /* ---------- search ---------- */
+function fromGoogle(lat,lng){if(useChinaMap(lat,lng)){const w=gcj2wgs(lat,lng);return{lat:w[0],lng:w[1]}}return{lat,lng}}
+function googleName(q){const m=q.match(/\/maps\/place\/([^\/@?]+)/);if(!m)return'';try{return decodeURIComponent(m[1].replace(/\+/g,' ')).split(',')[0].trim()}catch(e){return''}}
 function parseCoords(q){q=q.trim();let m;
-  if((m=q.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/)))return{lat:+m[1],lng:+m[2],src:'Google link'};
-  if((m=q.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/)))return{lat:+m[1],lng:+m[2],src:'Google link'};
+  if((m=q.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/)))return{...fromGoogle(+m[1],+m[2]),src:'Google link',name:googleName(q)};
+  if(/google\.[a-z.]+\/maps/.test(q)&&(m=q.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/)))return{...fromGoogle(+m[1],+m[2]),src:'Google link',name:googleName(q)};
+  if((m=q.match(/maps\.apple\.com\/.*[?&](?:coordinate|ll)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/))){const nm=(q.match(/[?&](?:name|q)=([^&]+)/)||[])[1];return{lat:+m[1],lng:+m[2],src:'Apple link',name:nm?decodeURIComponent(nm.replace(/\+/g,' ')):''}}
+  if((m=q.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/)))return{lat:+m[1],lng:+m[2],src:'Map link'};
   if((m=q.match(/(?:position|location|to|from)=(-?\d+\.\d+),(-?\d+\.\d+)/))&&/amap|autonavi|gaode/i.test(q)){const w=gcj2wgs(+m[2],+m[1]);return{lat:w[0],lng:w[1],src:'Amap link'}}
   if((m=q.match(/[?&](?:q|ll|daddr|sll)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/)))return{lat:+m[1],lng:+m[2],src:'Map link'};
   if((m=q.match(/^\s*(-?\d{1,2}\.\d+)\s*[, ]\s*(-?\d{1,3}\.\d+)\s*$/)))return{lat:+m[1],lng:+m[2],src:'Coordinates'};
   return null}
 function withTimeout(url,ms=7000){const c=new AbortController();const tm=setTimeout(()=>c.abort(),ms);return fetch(url,{signal:c.signal}).finally(()=>clearTimeout(tm))}
+const OSMCAT={restaurant:'food',fast_food:'food',food_court:'food',cafe:'cafe',bar:'nightlife',pub:'nightlife',nightclub:'nightlife',museum:'museum',gallery:'museum',attraction:'sight',viewpoint:'sight',artwork:'sight',place_of_worship:'sight',park:'nature',garden:'nature',nature_reserve:'nature',hotel:'stay',hostel:'stay',guest_house:'stay',mall:'shop',marketplace:'shop',department_store:'shop',station:'transit',aerodrome:'transit'};
+let lastNom=0;async function nomGate(){const w=lastNom+1100-Date.now();if(w>0)await new Promise(r=>setTimeout(r,w));lastNom=Date.now()}
+function cityHint(t){return (t.dest||'').split(',')[0].trim()}
+async function searchPlaces(q,city,local){
+  const t=T();const ctr=tripCenter(t)||(()=>{const c=U(map.getCenter());return{lat:c[0],lng:c[1]}})();const out=[];const key=S.settings.amapKey;
+  if(key){for(const kw of [local,q].filter(Boolean)){try{const r=await withTimeout(`https://restapi.amap.com/v3/place/text?keywords=${encodeURIComponent(kw)}${city?'&city='+encodeURIComponent(city):''}&offset=8&page=1&extensions=base&key=${encodeURIComponent(key)}`);const j=await r.json();
+    (j.pois||[]).forEach(p=>{const[lng,lat]=p.location.split(',').map(Number);const w=gcj2wgs(lat,lng);out.push({name:p.name,local:p.name,addrLocal:[p.cityname,p.adname,typeof p.address==='string'?p.address:''].filter(Boolean).join(''),addr:[p.pname,p.cityname].filter(Boolean).join(' '),lat:w[0],lng:w[1],src:'Amap',cat:/餐|美食|面|饭/.test(p.type||'')?'food':/咖啡/.test(p.type||'')?'cafe':/酒店|宾馆/.test(p.type||'')?'stay':''})})}catch(e){}if(out.length)break}}
+  const vb=`&viewbox=${ctr.lng-1},${ctr.lat+1},${ctr.lng+1},${ctr.lat-1}`;
+  const nom=async qq=>{await nomGate();try{const r=await withTimeout(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&namedetails=1&accept-language=en${vb}&q=${encodeURIComponent(qq)}`);const j=await r.json();
+    j.forEach(x=>{const nd=x.namedetails||{};const lc=nd['name:zh']||nd['name:zh-Hans']||nd['name:zh-Hant']||nd['name:ja']||nd['name:ko']||nd.name||'';const en=nd['name:en']||x.name||lc;out.push({name:en||x.display_name.split(',')[0],local:lc&&lc!==en?lc:'',addr:x.display_name,lat:+x.lat,lng:+x.lon,src:'OSM',cat:OSMCAT[x.type]||(x.category==='shop'?'shop':'')})})}catch(e){}};
+  if(!out.length){const withCity=city&&!q.toLowerCase().includes(city.toLowerCase())?`${q}, ${city}`:q;await nom(withCity);if(!out.length&&withCity!==q)await nom(q);if(!out.length&&local)await nom(local)}
+  if(!out.length){try{const r=await withTimeout(`https://photon.komoot.io/api/?limit=6&q=${encodeURIComponent(local||q)}&lat=${ctr.lat}&lon=${ctr.lng}`);const j=await r.json();
+    (j.features||[]).forEach(f=>{const p=f.properties;out.push({name:p.name||q,local:'',addr:[p.street,p.city,p.country].filter(Boolean).join(', '),lat:f.geometry.coordinates[1],lng:f.geometry.coordinates[0],src:'Photon',cat:OSMCAT[p.osm_value]||''})})}catch(e){}}
+  out.forEach(r=>r.km=hav(ctr,r));if(tripCenter(t))out.sort((a,b)=>(a.km>150)-(b.km>150));
+  return out}
 let lastResults=[];
 async function doSearch(q){q=(q||'').trim();if(!q)return;const box=$('#results');box.hidden=false;box.innerHTML='<div class="res">Searching…</div>';
-  const pc=parseCoords(q);if(pc){lastResults=[{name:'Pinned location',local:'',lat:pc.lat,lng:pc.lng,addr:`${pc.lat.toFixed(5)}, ${pc.lng.toFixed(5)}`,src:pc.src}];return showResults()}
-  const c=U(map.getCenter());let out=[];
-  const key=S.settings.amapKey;
-  if(key){try{const r=await withTimeout(`https://restapi.amap.com/v3/place/text?keywords=${encodeURIComponent(q)}&offset=10&page=1&extensions=base&key=${encodeURIComponent(key)}`);const j=await r.json();
-    (j.pois||[]).forEach(p=>{const[lng,lat]=p.location.split(',').map(Number);const w=gcj2wgs(lat,lng);out.push({name:p.name,local:p.name,addrLocal:[p.cityname,p.adname,typeof p.address==='string'?p.address:''].filter(Boolean).join(''),addr:[p.pname,p.cityname].filter(Boolean).join(' '),lat:w[0],lng:w[1],src:'Amap'})})}catch(e){}}
-  if(!out.length){try{const r=await withTimeout(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&namedetails=1&addressdetails=0&accept-language=en&q=${encodeURIComponent(q)}`);const j=await r.json();
-    j.forEach(x=>{const nd=x.namedetails||{};const local=nd['name:zh']||nd['name:ja']||nd['name:ko']||nd.name||'';const en=nd['name:en']||x.name||local;out.push({name:en||x.display_name.split(',')[0],local:local&&local!==en?local:'',addr:x.display_name,lat:+x.lat,lng:+x.lon,src:'OSM'})})}catch(e){}}
-  if(!out.length){try{const r=await withTimeout(`https://photon.komoot.io/api/?limit=8&q=${encodeURIComponent(q)}&lat=${c[0]}&lon=${c[1]}`);const j=await r.json();
-    (j.features||[]).forEach(f=>{const p=f.properties;out.push({name:p.name||q,local:'',addr:[p.street,p.city,p.country].filter(Boolean).join(', '),lat:f.geometry.coordinates[1],lng:f.geometry.coordinates[0],src:'Photon'})})}catch(e){}}
-  lastResults=out;showResults()}
+  const pc=parseCoords(q);if(pc){lastResults=[{name:pc.name||'Pinned location',local:'',lat:pc.lat,lng:pc.lng,addr:`${pc.lat.toFixed(5)}, ${pc.lng.toFixed(5)}`,src:pc.src}];return showResults()}
+  lastResults=await searchPlaces(q,'');showResults()}
 function showResults(){const box=$('#results');
   if(!lastResults.length){box.innerHTML=`<div class="res">No results, or the search service is unreachable from here.<small>Try an English or Chinese name, drop a pin on the map, or paste coordinates like 31.2400, 121.4900.</small></div><button class="res" id="addNoLoc">Add “${esc($('#q').value)}” without a location</button>`;
     $('#addNoLoc').onclick=()=>{box.hidden=true;addPlace({name:$('#q').value,lat:null,lng:null},true)};return}
   box.innerHTML=lastResults.map((r,i)=>`<button class="res" data-i="${i}"><span class="src">${r.src}</span><b>${esc(r.name)}</b>${r.local?` · ${esc(r.local)}`:''}<small>${esc(r.addr||'')}</small></button>`).join('');
   box.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{const r=lastResults[+b.dataset.i];box.hidden=true;$('#q').value='';addPlace(r,false)})}
-function addPlace(r,open){const t=T();const p={id:uid(),name:r.name||'New place',local:r.local||'',addrLocal:r.addrLocal||'',addr:r.addr||'',lat:r.lat,lng:r.lng,cat:'sight',day:null,order:t.places.length,time:'',dur:'',cost:'',link:'',notes:''};
+function addPlace(r,open){const t=T();const p={id:uid(),name:r.name||'New place',local:r.local||'',addrLocal:r.addrLocal||'',addr:r.addr||'',lat:r.lat,lng:r.lng,cat:r.cat||guessCat((r.name||'')+' '+(r.local||''))||'sight',day:null,order:t.places.length,time:'',dur:'',cost:'',link:'',notes:''};
   t.places.push(p);save();renderAll();if(p.lat!=null){map.setView(D(p.lat,p.lng),Math.max(map.getZoom(),15))}toast(`Saved “${p.name}” to ideas.`);if(open)openPlace(p.id)}
 
 /* ---------- sheets ---------- */
@@ -1142,6 +1159,82 @@ function driverCard(p){const d=document.createElement('div');d.className='driver
   d.innerHTML=hk?`<div class="ask">司機你好，請帶我去這裡：</div><div class="zh">${esc(p.local||p.name)}</div>${p.addrLocal?`<div class="addr">${esc(p.addrLocal)}</div>`:''}<div class="en">${esc(p.name)} · Please take me here. Tap anywhere to close.</div>${!p.local?'<div class="en" style="color:#A0522D">Tip: add the Chinese name and address so taxi drivers can read it.</div>':''}`:cn?`<div class="ask">师傅您好，请带我去这里：</div><div class="zh">${esc(p.local||p.name)}</div>${p.addrLocal?`<div class="addr">${esc(p.addrLocal)}</div>`:''}<div class="en">${esc(p.name)} · Please take me here. Tap anywhere to close.</div>${!p.local?'<div class="en" style="color:#A0522D">Tip: add the Chinese name and address to this place so drivers can read it.</div>':''}`
    :`<div class="ask">Please take me here</div><div class="zh">${esc(p.name)}</div>${p.local?`<div class="addr">${esc(p.local)}</div>`:''}${(p.addrLocal||p.addr)?`<div class="addr">${esc(p.addrLocal||p.addr)}</div>`:''}<div class="en">Tap anywhere to close.</div>`;
   d.onclick=()=>d.remove();document.body.appendChild(d);try{navigator.wakeLock&&navigator.wakeLock.request('screen').catch(()=>{})}catch(e){}}
+
+/* ---------- bulk add ---------- */
+const SRC_RE=/instagram\.com|instagr\.am|tiktok\.com|xhslink\.com|xiaohongshu\.com|youtube\.com|youtu\.be|threads\.net|facebook\.com|douyin\.com/i;
+function guessCat(s){s=s.toLowerCase();
+  if(/coffee|caf[eé]|咖啡|茶室|tea house/.test(s))return'cafe';
+  if(/\bbar\b|lounge|speakeasy|club|酒吧|pub\b/.test(s))return'nightlife';
+  if(/museum|gallery|博物馆|美术馆|exhibit/.test(s))return'museum';
+  if(/park|garden|lake|mountain|hike|trail|beach|island|公园|湖|山|岛/.test(s))return'nature';
+  if(/hotel|resort|inn\b|酒店|宾馆|民宿/.test(s))return'stay';
+  if(/mall|market|shop|store|boutique|商场|市场|商店/.test(s))return'shop';
+  if(/restaurant|noodle|dumpling|bao|hot ?pot|bbq|kitchen|bistro|eatery|dim sum|ramen|duck|bakery|dessert|饭|面|餐|火锅|烧烤|小笼|包|馆|饺|粥|烤鸭|茶餐厅/.test(s))return'food';
+  if(/temple|church|tower|old town|bund|street|road|palace|寺|塔|古镇|宫|路|街/.test(s))return'sight';
+  return''}
+const CHATTY=/\b(you|your|we|our|i|my|need|try|must|best|guide|spots|things|places|crawl|day \d|itinerary|follow|save this|link in bio|comment|tag|here are|list|part \d|hidden gems?)\b/i;
+function parseCandidates(text){const items=[],links=[];const seen=new Set();const hasPins=/📍|📌/u.test(text);
+  const push=it=>{const k=(it.text+'|'+(it.lat||'')).toLowerCase();if(seen.has(k))return;seen.add(k);items.push(it)};
+  text.split(/\r?\n+/).forEach(raw=>{let line=raw;
+    (line.match(/https?:\/\/\S+/g)||[]).forEach(u=>{const c=parseCoords(u);if(c)push({text:c.name||'Place from '+c.src,lat:c.lat,lng:c.lng,on:true,src:c.src});else if(SRC_RE.test(u))links.push(u.replace(/[)\].,]+$/,''))});
+    line=line.replace(/https?:\/\/\S+/g,' ');
+    const lc=parseCoords(line);if(lc){push({text:'Pinned location',lat:lc.lat,lng:lc.lng,on:true,src:lc.src});return}
+    const pinned=/📍|📌|🏠|🍜|🍽|☕|🥟|🍸/u.test(line);
+    let addrM=line.match(/^\s*(?:address|addr|location|地址|位置)\s*[:：]\s*(.+)$/i);if(addrM){if(items.length)items[items.length-1].addr=addrM[1].trim();return}
+    if(/^\s*(?:hours|open|price|cost|人均|营业|tel|phone|电话|💰|⏰|🕒)/iu.test(line))return;
+    line=line.replace(/#[^\s#]+/g,' ').replace(/(^|\s)@[\w.]+/g,' ').replace(/[\p{Extended_Pictographic}\uFE0F\u200D\u20E3]/gu,' ');
+    line=line.replace(/^\s*(?:\d{1,2}[.)、]|[-–•*·▪︎►>]+)\s*/,'');
+    let parts=line.split(/\s*[|•·;；]\s*/);
+    parts=parts.flatMap(x=>{const c=x.split(/\s*[,，]\s*/);return c.length>1&&c.every(y=>y.length<=40&&!/\d{2,}/.test(y))?c:[x]});
+    parts.forEach(x=>{x=x.trim().replace(/^[:：\-–\s]+|[.!?:：,\s]+$/g,'');if(x.length<2||x.length>70)return;
+      x=x.split(/\s+[–—-]\s+|\s*[:：]\s+(?=[a-z])/)[0].trim();
+      let local='';const lm=x.match(/[（(]([^)）]*[\u3400-\u9fff][^)）]*)[)）]/);if(lm){local=lm[1].trim();x=x.replace(lm[0],'').trim()}
+      else if(/^[\u3400-\u9fff\s·]+$/.test(x)){local=x}
+      else{const tm=x.match(/^(.*[A-Za-z].*?)\s+([\u3400-\u9fff][\u3400-\u9fff\s·]*)$/);if(tm){x=tm[1].trim();local=tm[2].trim()}}
+      const words=x.split(/\s+/).length;const looksName=words<=7&&!/[!?？！]$/.test(raw.trim())&&!CHATTY.test(x)&&!(hasPins&&!pinned&&words>4);
+      push({text:x||local,local,on:pinned||looksName,addr:''})})});
+  return{items,link:links[0]||''}}
+function openBulk(){const t=T();let stage='paste',cands=[],srcLink='',city=cityHint(t),cancel=false;
+  sheet(`<div class="sheethead"><h3>Bulk add places</h3><button class="btn sm ghost" data-x>Close</button></div><div id="bulkBody"></div>`,(s,close)=>{
+    s.querySelector('[data-x]').onclick=()=>{cancel=true;close()};const body=s.querySelector('#bulkBody');
+    const paste=()=>{body.innerHTML=`<div class="stack">
+      <p class="hint" style="margin:0">Paste an Instagram, TikTok or Xiaohongshu caption, a list of place names (one per line), or Google Maps links. You'll pick which ones to keep next.</p>
+      <label class="f">Caption, list or links<textarea id="bText" rows="8" placeholder="📍 Jia Jia Tang Bao (佳家汤包)&#10;📍 Wukang Road&#10;Yu Garden&#10;https://www.instagram.com/reel/..."></textarea></label>
+      <div class="grid2"><label class="f">Search near<input id="bCity" value="${esc(city)}" placeholder="City, e.g. Shanghai"></label><label class="f">Saved from (link)<input id="bSrc" type="url" placeholder="Instagram link, optional"></label></div>
+      <div class="row" style="justify-content:flex-end"><button class="btn primary" id="bParse">Find place names</button></div></div>`;
+      body.querySelector('#bText').addEventListener('input',e=>{const m=e.target.value.match(/https?:\/\/\S+/g)||[];const l=m.find(u=>SRC_RE.test(u));if(l&&!body.querySelector('#bSrc').value)body.querySelector('#bSrc').value=l});
+      body.querySelector('#bParse').onclick=()=>{const r=parseCandidates(body.querySelector('#bText').value);city=body.querySelector('#bCity').value.trim();srcLink=body.querySelector('#bSrc').value.trim()||r.link;cands=r.items;
+        if(!cands.length)return toast('No place names found. Put each place on its own line and try again.');pick()}};
+    const pick=()=>{body.innerHTML=`<p class="hint" style="margin:0 0 8px">Tick the places you want, and fix any names. Checked: <b id="bCount"></b></p>
+      <div class="stack" id="bList">${cands.map((c,i)=>`<label class="brow"><input type="checkbox" data-i="${i}" ${c.on?'checked':''}><input class="bname" data-n="${i}" value="${esc(c.text)}">${c.lat!=null?'<span class="chip">Has location</span>':''}</label>`).join('')}</div>
+      <div class="row" style="justify-content:space-between;margin-top:12px"><button class="btn ghost" id="bBack">Back</button><div class="row"><button class="btn sm ghost" id="bAll">Select all</button><button class="btn primary" id="bLook">Look up places</button></div></div>`;
+      const count=()=>{body.querySelector('#bCount').textContent=cands.filter(c=>c.on).length};count();
+      body.querySelectorAll('[data-i]').forEach(cb=>cb.onchange=()=>{cands[+cb.dataset.i].on=cb.checked;count()});
+      body.querySelectorAll('[data-n]').forEach(inp=>inp.oninput=()=>{const c=cands[+inp.dataset.n];c.text=inp.value;if(c.src&&!c.edited)c.edited=true});
+      body.querySelector('#bAll').onclick=()=>{cands.forEach(c=>c.on=true);pick()};
+      body.querySelector('#bBack').onclick=paste;body.querySelector('#bLook').onclick=lookup};
+    const lookup=async()=>{const chosen=cands.filter(c=>c.on&&c.text.trim());if(!chosen.length)return toast('Tick at least one place.');
+      body.innerHTML=`<p class="hint" id="bProg" style="margin:0 0 8px">Looking up ${chosen.length} place${chosen.length>1?'s':''}…</p><div class="stack" id="bRes"></div>
+        <div class="row" style="justify-content:space-between;margin-top:12px"><button class="btn ghost" id="bBack2">Back</button><button class="btn primary" id="bSave" disabled>Save to ideas</button></div>`;
+      body.querySelector('#bBack2').onclick=()=>{cancel=true;setTimeout(()=>{cancel=false;pick()},0)};
+      const res=body.querySelector('#bRes');
+      chosen.forEach((c,i)=>{c.matches=null;c.choice=0;c.keep=true;res.insertAdjacentHTML('beforeend',`<div class="brow res-row" id="br${i}"><input type="checkbox" data-k="${i}" checked><div style="min-width:0;flex:1"><div class="iname">${esc(c.text)}${c.local&&c.local!==c.text?` <span class="ilocal">${esc(c.local)}</span>`:''}</div><div class="bmatch hint" style="margin:2px 0 0">Waiting…</div></div></div>`)});
+      res.querySelectorAll('[data-k]').forEach(cb=>cb.onchange=()=>{chosen[+cb.dataset.k].keep=cb.checked;updSave()});
+      const updSave=()=>{const n=chosen.filter(c=>c.keep&&c.matches).length;const b=body.querySelector('#bSave');if(!b)return;b.disabled=!n;b.textContent=n?`Save ${n} to ideas`:'Save to ideas'};
+      body.querySelector('#bSave').onclick=()=>{let n=0;chosen.forEach(c=>{if(!c.keep||!c.matches)return;const m=c.choice>=0?c.matches[c.choice]:null;
+        t.places.push({id:uid(),name:(m&&m.name&&!c.edited&&c.lat==null&&!(/^[\u3400-\u9fff\s·]+$/.test(m.name)&&/[A-Za-z]/.test(c.text))?m.name:c.text).trim()||'Place',local:(m&&m.local)||(m&&/^[\u3400-\u9fff\s·]+$/.test(m.name)?m.name:'')||c.local||'',addrLocal:(m&&m.addrLocal)||'',addr:(m&&m.addr)||c.addr||'',lat:m?m.lat:null,lng:m?m.lng:null,cat:(m&&m.cat)||guessCat(c.text+' '+(c.local||''))||'sight',day:null,order:t.places.length,time:'',dur:'',cost:'',link:srcLink,notes:''});n++});
+        save();close();renderAll(true);toast(`Saved ${n} place${n===1?'':'s'} to ideas.`)};
+      for(let i=0;i<chosen.length;i++){if(cancel||!document.body.contains(s))return;const c=chosen[i];const row=res.querySelector('#br'+i);const mEl=row.querySelector('.bmatch');
+        body.querySelector('#bProg').textContent=`Looking up ${i+1} of ${chosen.length}…`;mEl.textContent='Searching…';
+        if(c.lat!=null){c.matches=[{name:c.text,lat:c.lat,lng:c.lng,addr:'',src:c.src}];mEl.textContent=`Location from ${c.src}`;updSave();continue}
+        const ms=(await searchPlaces(c.text,city,c.local)).slice(0,4);
+        if(ms.length){c.matches=ms;mEl.innerHTML=`<select class="bsel" data-m="${i}">${ms.map((m,j)=>`<option value="${j}">${esc(m.name)}${m.local?' · '+esc(m.local):''} (${esc((m.addr||'').split(',').slice(0,3).join(','))}${m.km!=null?`, ${m.km<10?m.km.toFixed(1):Math.round(m.km)} km from trip`:''})</option>`).join('')}<option value="-1">None of these: save without location</option></select>`;
+          mEl.querySelector('select').onchange=e=>{c.choice=+e.target.value}}
+        else{c.matches=[];c.choice=-1;mEl.innerHTML=`<span style="color:var(--warn)">Not found.</span> Saves without a location; open it later to paste a map link or drop a pin.`}
+        updSave()}
+      if(!document.body.contains(s))return;const nf=chosen.filter(c=>c.matches&&!c.matches.length).length;
+      body.querySelector('#bProg').textContent=`Done. ${chosen.length-nf} found${nf?`, ${nf} not found`:''}. Check each match, untick any you don't want, then save.`;updSave()};
+    paste()})}
 
 function blankTrip(){const today=new Date();today.setDate(today.getDate()+14);const t={id:uid(),name:'New trip',dest:'',start:today.toISOString().slice(0,10),days:[],places:[],bookings:[],expenses:[],checklist:[],currency:'CNY',home:'USD',rate:''};for(let i=0;i<3;i++)t.days.push({id:uid(),note:''});return t}
 function openTripSettings(isNew){const t=isNew?blankTrip():T();
